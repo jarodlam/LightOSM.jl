@@ -196,3 +196,95 @@ abstract type DijkstraDict <: Dijkstra end
 abstract type AStar <: PathAlgorithm end
 abstract type AStarVector <: AStar end
 abstract type AStarDict <: AStar end
+
+"""
+    ModifiedWeights{U<:Integer,W<:Real,M<:AbstractMatrix{<:W}} <: AbstractMatrix{W}
+
+Adaptor for a graph weights matrix, allowing weights and edges to be added to/removed from 
+an existing weights matrix without re-allocating the entire matrix. Internal use only.
+
+This is used for finding the shortest path between `EdgePoint`s. Weights are added to the 
+`OSMGraph.weights` matrix to connect the `EdgePoint`s to the graph using a 
+`ModifiedWeights` matrix.
+
+Note that this does not fully conform to the `AbstractMatrix` interface and should not be 
+used as a general matrix.
+
+# Fields
+- `weights::M`: Original weights matrix to modify.
+- `nv::U`: Number of graph vertices after modifying the graph.
+- `weights_add::Dict{Tuple{U,U},W}`: Weights to add. Key is the edge, value is 
+  the weight of the new edge.
+- `weights_rm::Set{Tuple{U,U}}`: Weights to remove, given by graph edges.
+"""
+struct ModifiedWeights{U<:Integer,W<:Real,M<:AbstractMatrix{<:W}} <: AbstractMatrix{W}
+    weights::M
+    nv::U
+    weights_add::Dict{Tuple{U,U},W}
+    weights_rm::Set{Tuple{U,U}}
+end
+Base.size(A::ModifiedWeights) = [A.nv, A.nv]
+function Base.getindex(A::ModifiedWeights{U,W,M}, i::Integer, j::Integer)::W where {U, W, M}
+    # Normal behaviour, just return the value from the underlying matrix
+    idx = (i, j)
+    add = idx in keys(A.weights_add)
+    rm = idx in A.weights_rm
+    if !add && !rm
+        return getindex(A.weights, idx)
+    end
+
+    # Weight has been added, return added weight
+    if add
+        return A.weights_add[(i,j)]
+    end
+
+    # Weight has been removed, return zero for no connection
+    return zero(W)
+end
+
+"""
+    ModifiedGraph{U<:Integer,G<:AbstractGraph{<:U}} <: AbstractGraph{U}
+
+Adaptor for a graph object, allowing vertices and edges to be added to/removed from an 
+existing graph object without re-allocating the entire object. Internal use only.
+
+This is used for finding the shortest path between `EdgePoint`s. Edges are added to the 
+`OSMGraph.graph` object to connect the `EdgePoint`s to the graph using a `ModifiedGraph` 
+object.
+
+Note that this does not fully conform to the `AbstractGraph` interface and should not be 
+used as a general graph object.
+
+# Fields
+- `graph::G`: Original graph object to modify.
+- `nv::U`: Number of graph vertices after modifying the graph.
+- `edges_add::Dict{U,Set{U}}`: Edges to add, format is `from node => to node`.
+- `edges_rm::Dict{U,Set{U}}`: Edges to remove, format is `from node => to node`.
+"""
+struct ModifiedGraph{U<:Integer,G<:AbstractGraph{<:U}} <: AbstractGraph{U}
+    graph::G
+    nv::U
+    edges_add::Dict{U,Set{U}}
+    edges_rm::Dict{U,Set{U}}
+end
+Graphs.nv(g::ModifiedGraph) = g.nv
+function Graphs.outneighbors(g::ModifiedGraph{U,G}, v::Integer)::Vector{U} where {U, G}
+    v = U(v)
+
+    # Normal behaviour, just return the value from the underlying graph
+    add = v in keys(g.edges_add)
+    rm = v in keys(g.edges_rm)
+    if !add && !rm
+        return outneighbors(g.graph, v)
+    end
+
+    # Modification needed, add/remove edges as needed
+    neigh = Set(has_vertex(g.graph, v) ? outneighbors(g.graph, v) : [])
+    if add
+        neigh = union(neigh, g.edges_add[v])
+    end
+    if rm 
+        neigh = setdiff(neigh, g.edges_rm[v])
+    end
+    return collect(neigh)
+end

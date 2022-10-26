@@ -280,3 +280,21 @@ function flatten(array::AbstractArray)::AbstractArray
     end
     return flattened
 end
+
+macro _withprogress(name, exp)
+    quote
+        Base.with_logger(TerminalLogger()) do
+            @withprogress name=$name begin
+                @logprogress 0
+                $exp
+                @logprogress 1 done=true
+            end
+        end
+    end |> esc
+end
+
+macro _logprogress(args...)
+    quote
+        eval(verbose) && @logprogress($(args...))
+    end |> esc
+end

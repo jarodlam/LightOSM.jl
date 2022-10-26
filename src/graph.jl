@@ -37,28 +37,49 @@ function graph_from_object(osm_data_object::Union{XMLDocument,Dict};
                            weight_type::Symbol=:time,
                            graph_type::Symbol=:static,
                            precompute_dijkstra_states::Bool=false,
-                           largest_connected_component::Bool=true
+                           largest_connected_component::Bool=true,
+                           verbose::Bool=false,
                            )::OSMGraph
-    g = init_graph_from_object(osm_data_object, network_type)
-    add_node_and_edge_mappings!(g)
-    add_weights!(g, weight_type)
-    add_graph!(g, graph_type)
-    # Finding connected components can only be done after LightGraph object has been constructed
-    largest_connected_component && trim_to_largest_connected_component!(g, g.graph, weight_type, graph_type) # Pass in graph to make type stable
-    add_node_tags!(g)
-    !(network_type in [:bike, :walk]) && add_indexed_restrictions!(g)
+    local g
 
-    if precompute_dijkstra_states
-        add_dijkstra_states!(g)
-    else
-        U = DEFAULT_OSM_INDEX_TYPE
-        g.dijkstra_states = Vector{Vector{U}}(undef, length(g.nodes))
+    @_withprogress "Generating graph" begin
+        g = init_graph_from_object(osm_data_object, network_type; verbose=verbose)
+        @_logprogress 1/9
+        add_node_and_edge_mappings!(g)
+        @_logprogress 2/9
+        add_weights!(g, weight_type)
+        @_logprogress 3/9
+        add_graph!(g, graph_type)
+        @_logprogress 4/9
+
+        # Finding connected components can only be done after LightGraph object has been constructed
+        largest_connected_component && trim_to_largest_connected_component!(g, g.graph, weight_type, graph_type) # Pass in graph to make type stable
+        @_logprogress 5/9
+        add_node_tags!(g)
+        @_logprogress 6/9
+        !(network_type in [:bike, :walk]) && add_indexed_restrictions!(g)
+        @_logprogress 7/9
+
+        if precompute_dijkstra_states
+            add_dijkstra_states!(g)
+        else
+            U = DEFAULT_OSM_INDEX_TYPE
+            g.dijkstra_states = Vector{Vector{U}}(undef, length(g.nodes))
+        end
+        @_logprogress 8/9
+
+        add_kdtree_and_rtree!(g)
     end
 
-    add_kdtree!(g)
-    @info "Created OSMGraph object with kwargs: `network_type=$network_type`, `weight_type=$weight_type`, `graph_type=$graph_type`, `precompute_dijkstra_states=$precompute_dijkstra_states`, `largest_connected_component=$largest_connected_component`"
+    verbose && @info "Created OSMGraph object with kwargs: `network_type=$network_type`, `weight_type=$weight_type`, `graph_type=$graph_type`, `precompute_dijkstra_states=$precompute_dijkstra_states`, `largest_connected_component=$largest_connected_component`"
     return g
 end
+
+function _next_ps!(ps::ProgressState)
+    ps.current_step += 1
+    return ps
+end
+_next_ps!(ps::Nothing) = nothing
 
 """
     graph_from_object(file_path::String;
@@ -87,7 +108,8 @@ function graph_from_file(file_path::String;
                          weight_type::Symbol=:time,
                          graph_type::Symbol=:static,
                          precompute_dijkstra_states::Bool=false,
-                         largest_connected_component::Bool=true
+                         largest_connected_component::Bool=true,
+                         verbose::Bool=false,
                          )::OSMGraph
 
     !isfile(file_path) && throw(ArgumentError("File $file_path does not exist"))
@@ -98,7 +120,8 @@ function graph_from_file(file_path::String;
                              weight_type=weight_type,
                              graph_type=graph_type,
                              precompute_dijkstra_states=precompute_dijkstra_states,
-                             largest_connected_component=largest_connected_component)
+                             largest_connected_component=largest_connected_component,
+                             verbose=verbose)
 end
 
 """
@@ -167,6 +190,7 @@ function graph_from_download(download_method::Symbol;
                              graph_type::Symbol=:static,
                              precompute_dijkstra_states::Bool=false,
                              largest_connected_component::Bool=true,
+                             verbose::Bool=false,
                              download_kwargs...
                              )::OSMGraph
     obj = download_osm_network(download_method,
@@ -180,7 +204,8 @@ function graph_from_download(download_method::Symbol;
                              weight_type=weight_type,
                              graph_type=graph_type,
                              precompute_dijkstra_states=precompute_dijkstra_states,
-                             largest_connected_component=largest_connected_component)
+                             largest_connected_component=largest_connected_component,
+                             verbose=verbose,)
 end
 
 
@@ -189,8 +214,9 @@ end
 
 Adds mappings between nodes, edges and ways to `OSMGraph`.
 """
-function add_node_and_edge_mappings!(g::OSMGraph{U,T,W}) where {U <: Integer,T <: Integer,W <: Real}
-    for (way_id, way) in g.ways
+function add_node_and_edge_mappings!(g::OSMGraph{U,T,W}; verbose::Bool=false) where {U <: Integer,T <: Integer,W <: Real}
+    n = length(g.ways)
+    @_withprogress "Adding node and edge mappings" for (i, (way_id, way)) in enumerate(g.ways)
         @inbounds for (i, node_id) in enumerate(way.nodes)
             if haskey(g.node_to_way, node_id)
                 push!(g.node_to_way[node_id], way_id)
@@ -214,6 +240,7 @@ function add_node_and_edge_mappings!(g::OSMGraph{U,T,W}) where {U <: Integer,T <
                 end
             end                
         end
+        @_logprogress i / length(g.ways)
     end
     
     # remove duplicates
@@ -345,7 +372,7 @@ end
 
 Adds edge weights to `OSMGraph`.
 """
-function add_weights!(g::OSMGraph, weight_type::Symbol=:distance)
+function add_weights!(g::OSMGraph, weight_type::Symbol=:distance; prog::Union{Nothing,ProgressState}=nothing)
     n_edges = length(g.edge_to_way)
     o_indices = Vector{Int}(undef, n_edges) # edge origin node indices
     d_indices = Vector{Int}(undef, n_edges) # edge destination node indices
@@ -353,7 +380,10 @@ function add_weights!(g::OSMGraph, weight_type::Symbol=:distance)
 
     W = DEFAULT_OSM_EDGE_WEIGHT_TYPE
 
+    n = length(g.edge_to_way)
     @inbounds for (i, edge) in enumerate(keys(g.edge_to_way))
+        log_step(prog, i / n)
+
         o_loc = g.nodes[edge[1]].location
         d_loc = g.nodes[edge[2]].location
 

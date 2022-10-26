@@ -197,14 +197,15 @@ end
 """
 Parse OpenStreetMap data into `Node`, `Way` and `Restriction` objects.
 """
-function parse_osm_network_dict(osm_network_dict::AbstractDict, network_type::Symbol=:drive)::OSMGraph
+function parse_osm_network_dict(osm_network_dict::AbstractDict, network_type::Symbol=:drive; verbose::Bool=false)::OSMGraph
     U = DEFAULT_OSM_INDEX_TYPE
     T = DEFAULT_OSM_ID_TYPE
     W = DEFAULT_OSM_EDGE_WEIGHT_TYPE
     
     ways = Dict{T,Way{T}}()
     highway_nodes = Set{Int}([])
-    for way in osm_network_dict["way"]
+    n = length(osm_network_dict["way"])
+    @progress "Adding ways" for (i, way) in enumerate(osm_network_dict["way"])
         if haskey(way, "tags") && haskey(way, "nodes")
             tags = way["tags"]
             if is_highway(tags) && matches_network_type(tags, network_type)
@@ -235,7 +236,8 @@ function parse_osm_network_dict(osm_network_dict::AbstractDict, network_type::Sy
     end
 
     nodes = Dict{T,Node{T}}()
-    for node in osm_network_dict["node"]
+    n = length(osm_network_dict["node"])
+    @progress "Adding nodes" for (i, node) in enumerate(osm_network_dict["node"])
         id = node["id"]
         if id in highway_nodes
             nodes[id] = Node{T}(
@@ -248,7 +250,8 @@ function parse_osm_network_dict(osm_network_dict::AbstractDict, network_type::Sy
     
     restrictions = Dict{T,Restriction{T}}()
     if haskey(osm_network_dict, "relation")
-        for relation in osm_network_dict["relation"]
+        n = length(osm_network_dict["relation"])
+        @progress "Adding restrictions" for (i, relation) in enumerate(osm_network_dict["relation"])
             if haskey(relation, "tags") && haskey(relation, "members")
                 tags = relation["tags"]
                 members = relation["members"]
@@ -277,6 +280,7 @@ function parse_osm_network_dict(osm_network_dict::AbstractDict, network_type::Sy
             end
         end
     end
+
     return OSMGraph{U,T,W}(nodes=nodes, ways=ways, restrictions=restrictions)
 end
 
@@ -333,15 +337,21 @@ end
 """
 Initialises the OSMGraph object from OpenStreetMap data downloaded in `:xml` or `:osm` format.
 """
-function init_graph_from_object(osm_xml_object::XMLDocument, network_type::Symbol=:drive)::OSMGraph
-    dict_to_parse = osm_dict_from_xml(osm_xml_object)
-    return parse_osm_network_dict(dict_to_parse, network_type)
+function init_graph_from_object(osm_xml_object::XMLDocument, network_type::Symbol=:drive; verbose::Bool=false)::OSMGraph
+    @_withprogress "Initialising graph" begin
+        dict_to_parse = osm_dict_from_xml(osm_xml_object)
+        @logprogress 1/2
+        return parse_osm_network_dict(dict_to_parse, network_type; verbose=verbose)
+    end
 end
 
 """
 Initialises the OSMGraph object from OpenStreetMap data downloaded in `:json` format.
 """
-function init_graph_from_object(osm_json_object::AbstractDict, network_type::Symbol=:drive)::OSMGraph
-    dict_to_parse = osm_dict_from_json(osm_json_object)
-    return parse_osm_network_dict(dict_to_parse, network_type)
+function init_graph_from_object(osm_json_object::AbstractDict, network_type::Symbol=:drive; verbose::Bool=false)::OSMGraph
+    @_withprogress "Initialising graph" begin
+        dict_to_parse = osm_dict_from_json(osm_json_object)
+        @logprogress 1/2
+        return parse_osm_network_dict(dict_to_parse, network_type; verbose=verbose)
+    end
 end

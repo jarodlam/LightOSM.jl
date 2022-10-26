@@ -196,3 +196,13 @@ abstract type DijkstraDict <: Dijkstra end
 abstract type AStar <: PathAlgorithm end
 abstract type AStarVector <: AStar end
 abstract type AStarDict <: AStar end
+
+mutable struct ProgressState
+    id::Base.UUID
+    prev_time::UInt64
+    current_step::Int
+    total_steps::Int
+    current_substep::Int
+    total_substeps::Int
+end
+ProgressState(id::Base.UUID, total_steps::Integer) = ProgressState(id, 0, 0, total_steps, 0, 0)

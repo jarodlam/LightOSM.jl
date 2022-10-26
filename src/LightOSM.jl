@@ -15,6 +15,8 @@ using JSON
 using LightXML
 using StaticArrays
 using SpatialIndexing
+using TerminalLoggers
+using ProgressLogging
 
 export GeoLocation,
        OSMGraph,
@@ -72,6 +74,7 @@ export index_to_node_id,
 include("types.jl")
 include("constants.jl")
 include("utilities.jl")
+include("progress.jl")
 include("geometry.jl")
 include("download.jl")
 include("parse.jl")

@@ -17,9 +17,27 @@ function wait_for_overpass()
 end
 
 @testset "Downloads" begin
-    filenames = ["map.osm", "map.json"]
-    formats = [:osm, :json]
-    for (filename, format) in zip(filenames, formats)
+    # filenames = ["map.osm", "map.json"]
+    # formats = [:osm, :json]
+    # extra_way_filters = Dict{String,Vector{String}}(
+    #     "highway" => ["primary", "secondary", "tertiary", "living_street"]
+    # )
+    # custom_way_exclusion_filters = [
+    #     nothing,
+    #     merge(LightOSM.WAY_EXCLUSION_FILTERS[:drive], extra_way_filters)
+    # ]
+    filenames = ["map.json"]
+    formats = [:json]
+    extra_way_filters = Dict{String,Vector{String}}(
+        "highway" => ["primary", "secondary", "tertiary", "living_street"]
+    )
+    custom_way_exclusion_filters = [
+        Dict(    # Merge default :drive filters and extra_way_filters
+            haskey(extra_way_filters,k) ? (k => collect(union(Set(v), Set(extra_way_filters[k])))) : (k => v) 
+            for (k,v) in LightOSM.WAY_EXCLUSION_FILTERS[:drive]
+        )
+    ]
+    for (filename, format, custom_way_exclusion_filter) in zip(filenames, formats, custom_way_exclusion_filters)
         try
             wait_for_overpass()
             data = download_osm_network(:point,
@@ -27,9 +45,33 @@ end
                                         point=GeoLocation(-37.8136, 144.9631),
                                         network_type=:drive,
                                         download_format=format,
-                                        save_to_file_location=filename);
+                                        save_to_file_location=filename,
+                                        custom_way_exclusion_filters=custom_way_exclusion_filter);
             @test isfile(filename)
-            g = graph_from_file(filename) # Check it doesn't error
+            g = graph_from_file(filename, custom_way_exclusion_filters=custom_way_exclusion_filter) # Check it doesn't error
+
+            # Check if custom way exclusion filters worked
+            isnothing(custom_way_exclusion_filter) && continue
+            @info custom_way_exclusion_filter
+            num_ways_with_excluded_tags_in_download = count(
+                element -> count(
+                    (tag_name, excluded_values) -> haskey(element.tags, tag_name) && element.tags[tag_name] in excluded_values,
+                    custom_way_exclusion_filter
+                ),
+                data["elements"]
+            )
+            ways_dont_have_excluded_tags_in_download = true
+            for element in data["elements"]
+                (element["type"] != "way") && continue
+                for (tag_name, tag_value) in element["tags"]
+                    if haskey(custom_way_exclusion_filter, tag_name) && (tag_value in custom_way_exclusion_filter[tag_name])
+                        @info element
+                        ways_dont_have_excluded_tags_in_download = false
+                        break
+                    end
+                end
+            end
+            @test ways_dont_have_excluded_tags_in_download
         catch err
             # Sometimes gets HTTP.ExceptionRequest.StatusError in tests due to connection to overpass
             !isa(err, HTTP.ExceptionRequest.StatusError) && rethrow()

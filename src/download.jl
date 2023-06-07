@@ -123,9 +123,12 @@ Forms an Overpass query string using geojosn polygon coordinates as a filter.
 function overpass_polygon_network_query(geojson_polygons::AbstractVector{<:AbstractVector},
                                         network_type::Symbol=:drive,
                                         metadata::Bool=false,
-                                        download_format::Symbol=:json
+                                        download_format::Symbol=:json,
+                                        custom_way_exclusion_filters::Union{Dict{String,Vector{String}},Nothing}=nothing,
                                         )::String
-    way_filter = WAY_FILTERS_QUERY[network_type]
+    way_filter = isnothing(custom_way_exclusion_filters) ? 
+        WAY_FILTERS_QUERY[network_type] :
+        """["highway"]$(concatenate_exclusions(filters))"""
     relation_filter = RELATION_FILTERS_QUERY[network_type]
 
     filters = ""
@@ -190,10 +193,11 @@ Downloads an OpenStreetMap network using any place name string.
 function osm_network_from_place_name(;place_name::String,
                                      network_type::Symbol=:drive,
                                      metadata::Bool=false,
-                                     download_format::Symbol=:json
+                                     download_format::Symbol=:json,
+                                     custom_way_exclusion_filters::Union{Dict{String,Vector{String}},Nothing}=nothing,
                                      )::String
     geojson_polygons = polygon_from_place_name(place_name)
-    query = overpass_polygon_network_query(geojson_polygons, network_type, metadata, download_format)
+    query = overpass_polygon_network_query(geojson_polygons, network_type, metadata, download_format, custom_way_exclusion_filters)
     return overpass_request(query)
 end
 
@@ -218,9 +222,10 @@ Downloads an OpenStreetMap network using a polygon.
 function osm_network_from_polygon(;polygon::AbstractVector{<:AbstractVector{<:Real}},
                                   network_type::Symbol=:drive,
                                   metadata::Bool=false,
-                                  download_format::Symbol=:json
+                                  download_format::Symbol=:json,
+                                  custom_way_exclusion_filters::Union{Dict{String,Vector{String}},Nothing}=nothing,
                                   )::String
-    query = overpass_polygon_network_query([polygon], network_type, metadata, download_format)
+    query = overpass_polygon_network_query([polygon], network_type, metadata, download_format, custom_way_exclusion_filters)
     return overpass_request(query)
 end
 
@@ -245,9 +250,13 @@ Forms an Overpass query string using a bounding box as a filter.
 function overpass_bbox_network_query(bbox::Vector{<:AbstractFloat},
                                      network_type::Symbol=:drive,
                                      metadata::Bool=false,
-                                     download_format::Symbol=:json
+                                     download_format::Symbol=:json,
+                                     custom_way_exclusion_filters::Union{Dict{String,Vector{String}},Nothing}=nothing,
                                      )::String
-    way_filter = WAY_FILTERS_QUERY[network_type]
+    
+    way_filter = isnothing(custom_way_exclusion_filters) ? 
+        WAY_FILTERS_QUERY[network_type] :
+        """["highway"]$(concatenate_exclusions(custom_way_exclusion_filters))"""
     relation_filter = RELATION_FILTERS_QUERY[network_type]
     filters = "way$way_filter;>;"
     if !isnothing(relation_filter)
@@ -286,9 +295,10 @@ function osm_network_from_bbox(;minlat::AbstractFloat,
                                maxlon::AbstractFloat,
                                network_type::Symbol=:drive,
                                metadata::Bool=false,
-                               download_format::Symbol=:json
+                               download_format::Symbol=:json,
+                               custom_way_exclusion_filters::Union{Dict{String,Vector{String}},Nothing}=nothing,
                                )::String
-    query = overpass_bbox_network_query([minlat, minlon, maxlat, maxlon], network_type, metadata, download_format)
+    query = overpass_bbox_network_query([minlat, minlon, maxlat, maxlon], network_type, metadata, download_format, custom_way_exclusion_filters)
     return overpass_request(query)
 end
 
@@ -316,10 +326,12 @@ function osm_network_from_point(;point::GeoLocation,
                                 radius::Number,
                                 network_type::Symbol=:drive,
                                 metadata::Bool=false,
-                                download_format::Symbol=:json
+                                download_format::Symbol=:json,
+                                custom_way_exclusion_filters::Union{Dict{String,Vector{String}},Nothing}=nothing,
+                                exclude_relations::Bool=false
                                 )::String
     bbox = bounding_box_from_point(point, radius)
-    return osm_network_from_bbox(;bbox..., network_type=network_type, metadata=metadata, download_format=download_format)
+    return osm_network_from_bbox(;bbox..., network_type=network_type, metadata=metadata, download_format=download_format, custom_way_exclusion_filters=custom_way_exclusion_filters)
 end
 
 """
@@ -393,10 +405,19 @@ function download_osm_network(download_method::Symbol;
                               metadata::Bool=false,
                               download_format::Symbol=:json,
                               save_to_file_location::Union{String,Nothing}=nothing,
+                              custom_way_exclusion_filters::Union{Dict{String,Vector{String}},Nothing}=nothing,
+                              exclude_relations::Bool=false,
                               download_kwargs...
                               )::Union{XMLDocument,Dict{String,Any}}
     downloader = osm_network_downloader(download_method)
-    data = downloader(network_type=network_type, metadata=metadata, download_format=download_format; download_kwargs...)
+    data = downloader(
+        network_type=network_type, 
+        metadata=metadata, 
+        download_format=download_format, 
+        custom_way_exclusion_filters=custom_way_exclusion_filters,
+        exclude_relations=exclude_relations; 
+        download_kwargs...
+    )
     @info "Downloaded osm network data from $(["$k: $v" for (k, v) in download_kwargs]) in $download_format format"
 
     if !(save_to_file_location isa Nothing)

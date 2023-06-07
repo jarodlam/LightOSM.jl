@@ -103,10 +103,15 @@ is_railway(tags::AbstractDict)::Bool = haskey(tags, "railway") ? true : false
 """
 Determine if way matches the specified network type.
 """
-function matches_network_type(tags::AbstractDict, network_type::Symbol)::Bool
-    for (k, v) in WAY_EXCLUSION_FILTERS[network_type]
-        if haskey(tags, k)
-            if tags[k] in Set(v)
+function matches_network_type(tags::AbstractDict, 
+                              network_type::Symbol,
+                              custom_way_exclusion_filters::Union{Dict{String,Vector{String}},Nothing}=nothing
+                              )::Bool
+    way_filters = isnothing(custom_way_exclusion_filters) ? WAY_EXCLUSION_FILTERS[network_type] : custom_way_exclusion_filters
+
+    for (excluded_tag_name, excluded_tag_values) in way_filters
+        if haskey(tags, excluded_tag_name)
+            if tags[excluded_tag_name] in excluded_tag_values
                 return false
             end
         end
@@ -197,7 +202,10 @@ end
 """
 Parse OpenStreetMap data into `Node`, `Way` and `Restriction` objects.
 """
-function parse_osm_network_dict(osm_network_dict::AbstractDict, network_type::Symbol=:drive)::OSMGraph
+function parse_osm_network_dict(osm_network_dict::AbstractDict, 
+                                network_type::Symbol=:drive,
+                                custom_way_exclusion_filters::Union{Dict{String,Vector{String}},Nothing}=nothing
+                                )::OSMGraph
     U = DEFAULT_OSM_INDEX_TYPE
     T = DEFAULT_OSM_ID_TYPE
     W = DEFAULT_OSM_EDGE_WEIGHT_TYPE
@@ -334,15 +342,21 @@ end
 """
 Initialises the OSMGraph object from OpenStreetMap data downloaded in `:xml` or `:osm` format.
 """
-function init_graph_from_object(osm_xml_object::XMLDocument, network_type::Symbol=:drive)::OSMGraph
+function init_graph_from_object(osm_xml_object::XMLDocument, 
+                                network_type::Symbol=:drive,
+                                custom_way_exclusion_filters::Union{Dict{String,Vector{String}},Nothing}=nothing
+                                )::OSMGraph
     dict_to_parse = osm_dict_from_xml(osm_xml_object)
-    return parse_osm_network_dict(dict_to_parse, network_type)
+    return parse_osm_network_dict(dict_to_parse, network_type, custom_way_exclusion_filters)
 end
 
 """
 Initialises the OSMGraph object from OpenStreetMap data downloaded in `:json` format.
 """
-function init_graph_from_object(osm_json_object::AbstractDict, network_type::Symbol=:drive)::OSMGraph
+function init_graph_from_object(osm_json_object::AbstractDict, 
+                                network_type::Symbol=:drive,
+                                custom_way_exclusion_filters::Union{Dict{String,Vector{String}},Nothing}=nothing
+                                )::OSMGraph
     dict_to_parse = osm_dict_from_json(osm_json_object)
-    return parse_osm_network_dict(dict_to_parse, network_type)
+    return parse_osm_network_dict(dict_to_parse, network_type, custom_way_exclusion_filters)
 end

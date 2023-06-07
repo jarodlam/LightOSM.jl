@@ -37,9 +37,10 @@ function graph_from_object(osm_data_object::Union{XMLDocument,Dict};
                            weight_type::Symbol=:time,
                            graph_type::Symbol=:static,
                            precompute_dijkstra_states::Bool=false,
-                           largest_connected_component::Bool=true
+                           largest_connected_component::Bool=true,
+                           custom_way_exclusion_filters::Union{Dict{String,Vector{String}},Nothing}=nothing
                            )::OSMGraph
-    g = init_graph_from_object(osm_data_object, network_type)
+    g = init_graph_from_object(osm_data_object, network_type, custom_way_exclusion_filters)
     add_node_and_edge_mappings!(g)
     add_weights!(g, weight_type)
     add_graph!(g, graph_type)
@@ -87,7 +88,8 @@ function graph_from_file(file_path::String;
                          weight_type::Symbol=:time,
                          graph_type::Symbol=:static,
                          precompute_dijkstra_states::Bool=false,
-                         largest_connected_component::Bool=true
+                         largest_connected_component::Bool=true,
+                         custom_way_exclusion_filters::Union{Dict{String,Vector{String}},Nothing}=nothing,
                          )::OSMGraph
 
     !isfile(file_path) && throw(ArgumentError("File $file_path does not exist"))
@@ -98,7 +100,8 @@ function graph_from_file(file_path::String;
                              weight_type=weight_type,
                              graph_type=graph_type,
                              precompute_dijkstra_states=precompute_dijkstra_states,
-                             largest_connected_component=largest_connected_component)
+                             largest_connected_component=largest_connected_component,
+                             custom_way_exclusion_filters=custom_way_exclusion_filters)
 end
 
 """
@@ -167,20 +170,23 @@ function graph_from_download(download_method::Symbol;
                              graph_type::Symbol=:static,
                              precompute_dijkstra_states::Bool=false,
                              largest_connected_component::Bool=true,
+                             custom_way_exclusion_filters::Union{Dict{String,Vector{String}},Nothing}=nothing,
                              download_kwargs...
                              )::OSMGraph
     obj = download_osm_network(download_method,
                                network_type=network_type,
                                metadata=metadata,
                                download_format=download_format,
-                               save_to_file_location=save_to_file_location;
+                               save_to_file_location=save_to_file_location,
+                               custom_way_exclusion_filters=custom_way_exclusion_filters;
                                download_kwargs...)
     return graph_from_object(obj,
                              network_type=network_type,
                              weight_type=weight_type,
                              graph_type=graph_type,
                              precompute_dijkstra_states=precompute_dijkstra_states,
-                             largest_connected_component=largest_connected_component)
+                             largest_connected_component=largest_connected_component,
+                             custom_way_exclusion_filters=custom_way_exclusion_filters)
 end
 
 
